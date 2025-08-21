@@ -264,6 +264,64 @@ jobs:
         key: ${{ steps.restore-cache-deps.outputs.cache-primary-key }}
         path: deps
 
+  build-wiiu:
+    needs: generate-soh-otr
+    runs-on: ${{ (vars.LINUX_RUNNER && fromJSON(vars.LINUX_RUNNER)) || 'ubuntu-latest' }}
+    container:
+      image: devkitpro/devkitppc:20240609
+    steps:
+    - name: Install dependencies
+      if: ${{ !vars.LINUX_RUNNER }}
+      run: |
+        sudo apt-get install -y ninja-build
+        sudo apt-get remove -y cmake
+        wget https://github.com/Kitware/CMake/releases/download/v3.28.3/cmake-3.28.3-linux-x86_64.sh -O /tmp/cmake.sh
+        sudo sh /tmp/cmake.sh --prefix=/usr/local/ --exclude-subdir
+        mkdir wut
+        cd wut
+        git init .
+        git remote add origin https://github.com/devkitPro/wut.git
+        git fetch --depth 1 origin f17054e3e86222c14a1094639558d34b690636ed
+        git checkout FETCH_HEAD
+        make -j$(nproc)
+        make install
+        cd ..
+
+    - uses: actions/checkout@v3
+      with:
+        submodules: true
+    - name: ccache
+      uses: hendrikmuhs/ccache-action@v1.2.11
+      with:
+        key: ${{ runner.os }}-wiiu-ccache-${{ github.ref }}-${{ github.sha }}
+        restore-keys: |
+          ${{ runner.os }}-wiiu-ccache-${{ github.ref }}
+          ${{ runner.os }}-wiiu-ccache-
+    - name: Build SoH
+      run: |
+        cmake -H. -Bbuild-wiiu -GNinja -DCMAKE_TOOLCHAIN_FILE=/opt/devkitpro/cmake/WiiU.cmake -DCMAKE_BUILD_TYPE:STRING=Release -DCMAKE_BUILD_TYPE:STRING=Release -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_C_COMPILER_LAUNCHER=ccache
+        cmake --build build-wiiu --target soh_wuhb --config Release -j3
+
+        mv build-wiiu/soh/*.rpx soh.rpx
+        mv build-wiiu/soh/*.wuhb soh.wuhb
+        mv README.md readme.txt
+      env:
+        DEVKITPRO: /opt/devkitpro
+        DEVKITPPC: /opt/devkitpro/devkitPPC
+    - name: Download soh.otr
+      uses: actions/download-artifact@v4
+      with:
+        name: soh.otr
+    - name: Upload build
+      uses: actions/upload-artifact@v4
+      with:
+        name: soh-wiiu
+        path: |
+          soh.rpx
+          soh.wuhb
+          soh.otr
+          readme.txt
+
   build-windows:
     needs: generate-soh-otr
     runs-on: windows-latest
